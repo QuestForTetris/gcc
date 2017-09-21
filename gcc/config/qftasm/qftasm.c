@@ -1,6 +1,8 @@
 /* Target machine for the QFT computer. -quartata */
 
 #include <assert.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "rtl.h"
 #include "target.h"
@@ -96,15 +98,15 @@ static const char *qft_multiply(rtx[] operands, unsigned int which_alternative) 
            ". MNZ A1 A3 0;\n"
            ". SUB A1 1 1;\n"
   } else { // memory and an immediate, either order
-    char[561] output_buffer; // number of bytes * shift buffer size without terminator + terminator = 16 * 35 + 1
-    char[36] shift_buffer; // length of format string + length of max short + terminator = 36
+    char *output_buffer = (char*) malloc(561); // number of bytes * shift buffer size without terminator + terminator = 16 * 35 + 1
+    char shift_buffer[36]; // length of format string + length of max short + terminator = 36
     int pos = 0;
 
-    int immediate = INTVAL(operands[which_alternative]);
+    int immediate = INTVAL(operands[which_alternative ^ 3]);
 
     for (int i = 0; i < 16; i++) {
       if (immediate & (1 << i)) {
-        int copied = sprintf(shift_buffer, ". SL A%%%d %d 1;\n. ADD A%%0 A1 %%0;\n", ~which_alternative, i);
+        int copied = sprintf(shift_buffer, ". SL A%%%d %d 1;\n. ADD A%%0 A1 %%0;\n", which_alternative, i);
 
         memcpy(output_buffer + pos, shift_buffer, copied);
         pos += copied;
@@ -112,7 +114,7 @@ static const char *qft_multiply(rtx[] operands, unsigned int which_alternative) 
     }
 
     output_buffer[pos] = '\0';
-    return output_buffer;
+    return (const char*) output_buffer;
   }
 }
 
