@@ -512,6 +512,9 @@ tilegx*-*-*)
 tilepro*-*-*)
 	cpu_type=tilepro
 	;;
+qftasm*-*-*)
+	cpu_type=qftasm
+	;;
 esac
 
 tm_file=${cpu_type}/${cpu_type}.h
@@ -3092,6 +3095,8 @@ m32c-*-elf*)
 	c_target_objs="m32c-pragma.o"
 	cxx_target_objs="m32c-pragma.o"
  	;;
+qftasm-*-*)
+	;;
 *)
 	echo "*** Configuration ${target} not supported" 1>&2
 	exit 1
