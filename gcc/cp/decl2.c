@@ -606,11 +606,20 @@ check_classfn (tree ctype, tree function, tree template_parms)
      resolving within the scope of CTYPE.  */
   tree pushed_scope = push_scope (ctype);
   tree matched = NULL_TREE;
-  tree fns = lookup_fnfields_slot (ctype, DECL_NAME (function));
+  tree fns = get_class_binding (ctype, DECL_NAME (function));
   
   for (ovl_iterator iter (fns); !matched && iter; ++iter)
     {
       tree fndecl = *iter;
+
+      /* A member template definition only matches a member template
+	 declaration.  */
+      if (is_template != (TREE_CODE (fndecl) == TEMPLATE_DECL))
+	continue;
+
+      if (!DECL_DECLARES_FUNCTION_P (fndecl))
+	continue;
+
       tree p1 = TYPE_ARG_TYPES (TREE_TYPE (function));
       tree p2 = TYPE_ARG_TYPES (TREE_TYPE (fndecl));
 
@@ -624,11 +633,6 @@ check_classfn (tree ctype, tree function, tree template_parms)
       if (DECL_STATIC_FUNCTION_P (fndecl)
 	  && TREE_CODE (TREE_TYPE (function)) == METHOD_TYPE)
 	p1 = TREE_CHAIN (p1);
-
-      /* A member template definition only matches a member template
-	 declaration.  */
-      if (is_template != (TREE_CODE (fndecl) == TEMPLATE_DECL))
-	continue;
 
       /* ref-qualifier or absence of same must match.  */
       if (type_memfn_rqual (TREE_TYPE (function))
@@ -664,7 +668,7 @@ check_classfn (tree ctype, tree function, tree template_parms)
       else
 	{
 	  if (DECL_CONV_FN_P (function))
-	    fns = lookup_all_conversions (ctype);
+	    fns = get_class_binding (ctype, conv_op_identifier);
 
 	  error_at (DECL_SOURCE_LOCATION (function),
 		    "no declaration matches %q#D", function);
@@ -1004,6 +1008,13 @@ grokbitfield (const cp_declarator *declarator,
   if (TREE_CODE (value) == FUNCTION_DECL)
     {
       error ("cannot declare bit-field %qD with function type",
+	     DECL_NAME (value));
+      return NULL_TREE;
+    }
+
+  if (width && TYPE_WARN_IF_NOT_ALIGN (TREE_TYPE (value)))
+    {
+      error ("cannot declare bit-field %qD with %<warn_if_not_aligned%> type",
 	     DECL_NAME (value));
       return NULL_TREE;
     }
@@ -1535,7 +1546,7 @@ finish_anon_union (tree anon_union_decl)
     return;
   if (main_decl == NULL_TREE)
     {
-      warning (0, "anonymous union with no members");
+      pedwarn (input_location, 0, "anonymous union with no members");
       return;
     }
 

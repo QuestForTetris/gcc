@@ -1026,7 +1026,7 @@ extern void omp_clause_range_check_failed (const_tree, const char *, int,
 #define TREE_IMAGPART(NODE) (COMPLEX_CST_CHECK (NODE)->complex.imag)
 
 /* In a VECTOR_CST node.  */
-#define VECTOR_CST_NELTS(NODE) (TYPE_VECTOR_SUBPARTS (TREE_TYPE (NODE)))
+#define VECTOR_CST_NELTS(NODE) (VECTOR_CST_CHECK (NODE)->base.u.nelts)
 #define VECTOR_CST_ELTS(NODE) (VECTOR_CST_CHECK (NODE)->vector.elts)
 #define VECTOR_CST_ELT(NODE,IDX) (VECTOR_CST_CHECK (NODE)->vector.elts[IDX])
 
@@ -1849,10 +1849,17 @@ extern void protected_set_expr_location (tree, location_t);
 #define TYPE_MODE(NODE) \
   (VECTOR_TYPE_P (TYPE_CHECK (NODE)) \
    ? vector_type_mode (NODE) : (NODE)->type_common.mode)
+#define SCALAR_TYPE_MODE(NODE) \
+  (as_a <scalar_mode> (TYPE_CHECK (NODE)->type_common.mode))
+#define SCALAR_INT_TYPE_MODE(NODE) \
+  (as_a <scalar_int_mode> (TYPE_CHECK (NODE)->type_common.mode))
+#define SCALAR_FLOAT_TYPE_MODE(NODE) \
+  (as_a <scalar_float_mode> (TYPE_CHECK (NODE)->type_common.mode))
 #define SET_TYPE_MODE(NODE, MODE) \
   (TYPE_CHECK (NODE)->type_common.mode = (MODE))
 
-extern machine_mode element_mode (const_tree t);
+extern machine_mode element_mode (const_tree);
+extern machine_mode vector_type_mode (const_tree);
 
 /* The "canonical" type for this type node, which is used by frontends to
    compare the type for equality with another type.  If two types are
@@ -1918,6 +1925,16 @@ extern machine_mode element_mode (const_tree t);
 
 /* The alignment for NODE, in bytes.  */
 #define TYPE_ALIGN_UNIT(NODE) (TYPE_ALIGN (NODE) / BITS_PER_UNIT)
+
+/* The minimum alignment necessary for objects of this type without
+   warning.  The value is an int, measured in bits.  */
+#define TYPE_WARN_IF_NOT_ALIGN(NODE) \
+    (TYPE_CHECK (NODE)->type_common.warn_if_not_align \
+     ? ((unsigned)1) << ((NODE)->type_common.warn_if_not_align - 1) : 0)
+
+/* Specify that TYPE_WARN_IF_NOT_ALIGN(NODE) is X.  */
+#define SET_TYPE_WARN_IF_NOT_ALIGN(NODE, X) \
+    (TYPE_CHECK (NODE)->type_common.warn_if_not_align = ffs_hwi (X))
 
 /* If your language allows you to declare types, and you want debug info
    for them, then you need to generate corresponding TYPE_DECL nodes.
@@ -2129,14 +2146,13 @@ extern machine_mode element_mode (const_tree t);
 #define TYPE_ARRAY_MAX_SIZE(ARRAY_TYPE) \
   (ARRAY_TYPE_CHECK (ARRAY_TYPE)->type_non_common.maxval)
 #define TYPE_MAX_VALUE_RAW(NODE) (TYPE_CHECK (NODE)->type_non_common.maxval)
-
 /* For record and union types, information about this type, as a base type
    for itself.  */
-#define TYPE_BINFO(NODE) (RECORD_OR_UNION_CHECK (NODE)->type_non_common.binfo)
+#define TYPE_BINFO(NODE) (RECORD_OR_UNION_CHECK (NODE)->type_non_common.maxval)
 
-/* For non record and union types, used in a language-dependent way.  */
+/* For types, used in a language-dependent way.  */
 #define TYPE_LANG_SLOT_1(NODE) \
-  (NOT_RECORD_OR_UNION_CHECK (NODE)->type_non_common.binfo)
+  (TYPE_CHECK (NODE)->type_non_common.lang_1)
 
 /* Define accessor macros for information about type inheritance
    and basetypes.
@@ -2371,6 +2387,16 @@ extern machine_mode element_mode (const_tree t);
 /* Specify that DECL_ALIGN(NODE) is X.  */
 #define SET_DECL_ALIGN(NODE, X) \
     (DECL_COMMON_CHECK (NODE)->decl_common.align = ffs_hwi (X))
+
+/* The minimum alignment necessary for the datum, in bits, without
+   warning.  */
+#define DECL_WARN_IF_NOT_ALIGN(NODE) \
+    (DECL_COMMON_CHECK (NODE)->decl_common.warn_if_not_align \
+     ? ((unsigned)1) << ((NODE)->decl_common.warn_if_not_align - 1) : 0)
+
+/* Specify that DECL_WARN_IF_NOT_ALIGN(NODE) is X.  */
+#define SET_DECL_WARN_IF_NOT_ALIGN(NODE, X) \
+    (DECL_COMMON_CHECK (NODE)->decl_common.warn_if_not_align = ffs_hwi (X))
 
 /* The alignment of NODE, in bytes.  */
 #define DECL_ALIGN_UNIT(NODE) (DECL_ALIGN (NODE) / BITS_PER_UNIT)
@@ -4000,7 +4026,7 @@ extern tree build_int_cst (tree, HOST_WIDE_INT);
 extern tree build_int_cstu (tree type, unsigned HOST_WIDE_INT cst);
 extern tree build_int_cst_type (tree, HOST_WIDE_INT);
 extern tree make_vector (unsigned CXX_MEM_STAT_INFO);
-extern tree build_vector (tree, tree * CXX_MEM_STAT_INFO);
+extern tree build_vector (tree, vec<tree> CXX_MEM_STAT_INFO);
 extern tree build_vector_from_ctor (tree, vec<constructor_elt, va_gc> *);
 extern tree build_vector_from_val (tree, tree);
 extern void recompute_constructor_flags (tree);
@@ -5394,4 +5420,13 @@ struct builtin_structptr_type
   const char *str;
 };
 extern const builtin_structptr_type builtin_structptr_types[6];
+
+/* Return true if type T has the same precision as its underlying mode.  */
+
+inline bool
+type_has_mode_precision_p (const_tree t)
+{
+  return TYPE_PRECISION (t) == GET_MODE_PRECISION (TYPE_MODE (t));
+}
+
 #endif  /* GCC_TREE_H  */

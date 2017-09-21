@@ -64,6 +64,8 @@ along with GCC; see the file COPYING3.  If not see
 #include "selftest.h"
 #include "stringpool.h"
 #include "attribs.h"
+#include "rtl.h"
+#include "regs.h"
 
 /* Tree code classes.  */
 
@@ -871,7 +873,7 @@ tree_size (const_tree node)
 
     case VECTOR_CST:
       return (sizeof (struct tree_vector)
-	      + (TYPE_VECTOR_SUBPARTS (TREE_TYPE (node)) - 1) * sizeof (tree));
+	      + (VECTOR_CST_NELTS (node) - 1) * sizeof (tree));
 
     case STRING_CST:
       return TREE_STRING_LENGTH (node) + offsetof (struct tree_string, str) + 1;
@@ -1694,23 +1696,26 @@ make_vector (unsigned len MEM_STAT_DECL)
 
   TREE_SET_CODE (t, VECTOR_CST);
   TREE_CONSTANT (t) = 1;
+  VECTOR_CST_NELTS (t) = len;
 
   return t;
 }
 
 /* Return a new VECTOR_CST node whose type is TYPE and whose values
-   are in a list pointed to by VALS.  */
+   are given by VALS.  */
 
 tree
-build_vector (tree type, tree *vals MEM_STAT_DECL)
+build_vector (tree type, vec<tree> vals MEM_STAT_DECL)
 {
+  unsigned int nelts = vals.length ();
+  gcc_assert (nelts == TYPE_VECTOR_SUBPARTS (type));
   int over = 0;
   unsigned cnt = 0;
-  tree v = make_vector (TYPE_VECTOR_SUBPARTS (type));
+  tree v = make_vector (nelts);
   TREE_TYPE (v) = type;
 
   /* Iterate through elements and check for overflow.  */
-  for (cnt = 0; cnt < TYPE_VECTOR_SUBPARTS (type); ++cnt)
+  for (cnt = 0; cnt < nelts; ++cnt)
     {
       tree value = vals[cnt];
 
@@ -1733,20 +1738,21 @@ build_vector (tree type, tree *vals MEM_STAT_DECL)
 tree
 build_vector_from_ctor (tree type, vec<constructor_elt, va_gc> *v)
 {
-  tree *vec = XALLOCAVEC (tree, TYPE_VECTOR_SUBPARTS (type));
-  unsigned HOST_WIDE_INT idx, pos = 0;
+  unsigned int nelts = TYPE_VECTOR_SUBPARTS (type);
+  unsigned HOST_WIDE_INT idx;
   tree value;
 
+  auto_vec<tree, 32> vec (nelts);
   FOR_EACH_CONSTRUCTOR_VALUE (v, idx, value)
     {
       if (TREE_CODE (value) == VECTOR_CST)
 	for (unsigned i = 0; i < VECTOR_CST_NELTS (value); ++i)
-	  vec[pos++] = VECTOR_CST_ELT (value, i);
+	  vec.quick_push (VECTOR_CST_ELT (value, i));
       else
-	vec[pos++] = value;
+	vec.quick_push (value);
     }
-  while (pos < TYPE_VECTOR_SUBPARTS (type))
-    vec[pos++] = build_zero_cst (TREE_TYPE (type));
+  while (vec.length () < nelts)
+    vec.quick_push (build_zero_cst (TREE_TYPE (type)));
 
   return build_vector (type, vec);
 }
@@ -1771,9 +1777,9 @@ build_vector_from_val (tree vectype, tree sc)
 
   if (CONSTANT_CLASS_P (sc))
     {
-      tree *v = XALLOCAVEC (tree, nunits);
+      auto_vec<tree, 32> v (nunits);
       for (i = 0; i < nunits; ++i)
-	v[i] = sc;
+	v.quick_push (sc);
       return build_vector (vectype, v);
     }
   else
@@ -2130,8 +2136,9 @@ build_minus_one_cst (tree type)
     case FIXED_POINT_TYPE:
       /* We can only generate 1 for accum types.  */
       gcc_assert (ALL_SCALAR_ACCUM_MODE_P (TYPE_MODE (type)));
-      return build_fixed (type, fixed_from_double_int (double_int_minus_one,
-						       TYPE_MODE (type)));
+      return build_fixed (type,
+			  fixed_from_double_int (double_int_minus_one,
+						 SCALAR_TYPE_MODE (type)));
 
     case VECTOR_TYPE:
       {
@@ -4890,9 +4897,7 @@ free_lang_data_in_type (tree type)
 	 leading to false ODR violation errors when merging two
 	 instances of the same function signature compiled by
 	 different front ends.  */
-      tree p;
-
-      for (p = TYPE_ARG_TYPES (type); p; p = TREE_CHAIN (p))
+      for (tree p = TYPE_ARG_TYPES (type); p; p = TREE_CHAIN (p))
 	{
 	  tree arg_type = TREE_VALUE (p);
 
@@ -4908,68 +4913,29 @@ free_lang_data_in_type (tree type)
 	  TREE_PURPOSE (p) = NULL;
 	}
     }
-  if (TREE_CODE (type) == METHOD_TYPE)
+  else if (TREE_CODE (type) == METHOD_TYPE)
+    for (tree p = TYPE_ARG_TYPES (type); p; p = TREE_CHAIN (p))
+      /* C++ FE uses TREE_PURPOSE to store initial values.  */
+      TREE_PURPOSE (p) = NULL;
+  else if (RECORD_OR_UNION_TYPE_P (type))
     {
-      tree p;
-
-      for (p = TYPE_ARG_TYPES (type); p; p = TREE_CHAIN (p))
-	{
-	  /* C++ FE uses TREE_PURPOSE to store initial values.  */
-	  TREE_PURPOSE (p) = NULL;
-	}
-    }
-
-  /* Remove members that are not actually FIELD_DECLs from the field
-     list of an aggregate.  These occur in C++.  */
-  if (RECORD_OR_UNION_TYPE_P (type))
-    {
-      tree prev, member;
-
-      /* Note that TYPE_FIELDS can be shared across distinct
-	 TREE_TYPEs.  Therefore, if the first field of TYPE_FIELDS is
-	 to be removed, we cannot set its TREE_CHAIN to NULL.
-	 Otherwise, we would not be able to find all the other fields
-	 in the other instances of this TREE_TYPE.
-
-	 This was causing an ICE in testsuite/g++.dg/lto/20080915.C.  */
-      prev = NULL_TREE;
-      member = TYPE_FIELDS (type);
-      while (member)
-	{
-	  if (TREE_CODE (member) == FIELD_DECL
-	      || (TREE_CODE (member) == TYPE_DECL
-		  && !DECL_IGNORED_P (member)
-		  && debug_info_level > DINFO_LEVEL_TERSE
-		  && !is_redundant_typedef (member)))
-	    {
-	      if (prev)
-		TREE_CHAIN (prev) = member;
-	      else
-		TYPE_FIELDS (type) = member;
-	      prev = member;
-	    }
-
-	  member = TREE_CHAIN (member);
-	}
-
-      if (prev)
-	TREE_CHAIN (prev) = NULL_TREE;
-      else
-	TYPE_FIELDS (type) = NULL_TREE;
+      /* Remove members that are not FIELD_DECLs (and maybe
+	 TYPE_DECLs) from the field list of an aggregate.  These occur
+	 in C++.  */
+      for (tree *prev = &TYPE_FIELDS (type), member; (member = *prev);)
+	if (TREE_CODE (member) == FIELD_DECL
+	    || (TREE_CODE (member) == TYPE_DECL
+		&& !DECL_IGNORED_P (member)
+		&& debug_info_level > DINFO_LEVEL_TERSE
+		&& !is_redundant_typedef (member)))
+	  prev = &DECL_CHAIN (member);
+	else
+	  *prev = DECL_CHAIN (member);
 
       /* FIXME: C FE uses TYPE_VFIELD to record C_TYPE_INCOMPLETE_VARS
  	 and danagle the pointer from time to time.  */
       if (TYPE_VFIELD (type) && TREE_CODE (TYPE_VFIELD (type)) != FIELD_DECL)
         TYPE_VFIELD (type) = NULL_TREE;
-
-      /* Splice out FUNCTION_DECLS and TEMPLATE_DECLS from
-	 TYPE_FIELDS.  So LTO doesn't grow.  */
-      for (tree probe, *prev= &TYPE_FIELDS (type); (probe = *prev); )
-	if (TREE_CODE (probe) == FUNCTION_DECL
-	    || TREE_CODE (probe) == TEMPLATE_DECL)
-	  *prev = probe;
-	else
-	  prev = &DECL_CHAIN (probe);
 
       if (TYPE_BINFO (type))
 	{
@@ -4987,20 +4953,15 @@ free_lang_data_in_type (tree type)
 	    TYPE_BINFO (type) = NULL;
 	}
     }
-  else
+  else if (INTEGRAL_TYPE_P (type)
+	   || SCALAR_FLOAT_TYPE_P (type)
+	   || FIXED_POINT_TYPE_P (type))
     {
-      /* For non-aggregate types, clear out the language slot (which
-	 overloads TYPE_BINFO).  */
-      TYPE_LANG_SLOT_1 (type) = NULL_TREE;
-
-      if (INTEGRAL_TYPE_P (type)
-	  || SCALAR_FLOAT_TYPE_P (type)
-	  || FIXED_POINT_TYPE_P (type))
-	{
-	  free_lang_data_in_one_sizepos (&TYPE_MIN_VALUE (type));
-	  free_lang_data_in_one_sizepos (&TYPE_MAX_VALUE (type));
-	}
+      free_lang_data_in_one_sizepos (&TYPE_MIN_VALUE (type));
+      free_lang_data_in_one_sizepos (&TYPE_MAX_VALUE (type));
     }
+
+  TYPE_LANG_SLOT_1 (type) = NULL_TREE;
 
   free_lang_data_in_one_sizepos (&TYPE_SIZE (type));
   free_lang_data_in_one_sizepos (&TYPE_SIZE_UNIT (type));
@@ -5382,6 +5343,7 @@ find_decls_types_r (tree *tp, int *ws, void *data)
 	 this way.  */
       if (!POINTER_TYPE_P (t))
 	fld_worklist_push (TYPE_MIN_VALUE_RAW (t), fld);
+      /* TYPE_MAX_VALUE_RAW is TYPE_BINFO for record types.  */
       if (!RECORD_OR_UNION_TYPE_P (t))
 	fld_worklist_push (TYPE_MAX_VALUE_RAW (t), fld);
       fld_worklist_push (TYPE_MAIN_VARIANT (t), fld);
@@ -5706,6 +5668,10 @@ free_lang_data (void)
   if (in_lto_p
       || (!flag_generate_lto && !flag_generate_offload))
     return 0;
+
+  /* Provide a dummy TRANSLATION_UNIT_DECL if the FE failed to provide one.  */
+  if (vec_safe_is_empty (all_translation_units))
+    build_translation_unit_decl (NULL_TREE);
 
   /* Allocate and assign alias sets to the standard integer types
      while the slots are still in the way the frontends generated them.  */
@@ -7550,6 +7516,7 @@ build_range_type_1 (tree type, tree lowval, tree highval, bool shared)
   TYPE_SIZE_UNIT (itype) = TYPE_SIZE_UNIT (type);
   SET_TYPE_ALIGN (itype, TYPE_ALIGN (type));
   TYPE_USER_ALIGN (itype) = TYPE_USER_ALIGN (type);
+  SET_TYPE_WARN_IF_NOT_ALIGN (itype, TYPE_WARN_IF_NOT_ALIGN (type));
 
   if (!shared)
     return itype;
@@ -8499,7 +8466,7 @@ retry:
   /* Third, unsigned integers with top bit set never fit signed types.  */
   if (!TYPE_UNSIGNED (type) && sgn_c == UNSIGNED)
     {
-      int prec = GET_MODE_PRECISION (TYPE_MODE (TREE_TYPE (c))) - 1;
+      int prec = GET_MODE_PRECISION (SCALAR_INT_TYPE_MODE (TREE_TYPE (c))) - 1;
       if (prec < TYPE_PRECISION (TREE_TYPE (c)))
 	{
 	  /* When a tree_cst is converted to a wide-int, the precision
@@ -8642,8 +8609,16 @@ variably_modified_type_p (tree type, tree fn)
     case POINTER_TYPE:
     case REFERENCE_TYPE:
     case VECTOR_TYPE:
+      /* Ada can have pointer types refering to themselves indirectly.  */
+      if (TREE_VISITED (type))
+	return false;
+      TREE_VISITED (type) = true;
       if (variably_modified_type_p (TREE_TYPE (type), fn))
-	return true;
+	{
+	  TREE_VISITED (type) = false;
+	  return true;
+	}
+      TREE_VISITED (type) = false;
       break;
 
     case FUNCTION_TYPE:
@@ -9719,8 +9694,8 @@ build_common_tree_nodes (bool signed_char)
     {
       int n = floatn_nx_types[i].n;
       bool extended = floatn_nx_types[i].extended;
-      machine_mode mode = targetm.floatn_mode (n, extended);
-      if (mode == VOIDmode)
+      scalar_float_mode mode;
+      if (!targetm.floatn_mode (n, extended).exists (&mode))
 	continue;
       int precision = GET_MODE_PRECISION (mode);
       /* Work around the rs6000 KFmode having precision 113 not
@@ -10231,6 +10206,7 @@ tree
 build_vector_type_for_mode (tree innertype, machine_mode mode)
 {
   int nunits;
+  unsigned int bitsize;
 
   switch (GET_MODE_CLASS (mode))
     {
@@ -10245,11 +10221,9 @@ build_vector_type_for_mode (tree innertype, machine_mode mode)
 
     case MODE_INT:
       /* Check that there are no leftover bits.  */
-      gcc_assert (GET_MODE_BITSIZE (mode)
-		  % TREE_INT_CST_LOW (TYPE_SIZE (innertype)) == 0);
-
-      nunits = GET_MODE_BITSIZE (mode)
-	       / TREE_INT_CST_LOW (TYPE_SIZE (innertype));
+      bitsize = GET_MODE_BITSIZE (as_a <scalar_int_mode> (mode));
+      gcc_assert (bitsize % TREE_INT_CST_LOW (TYPE_SIZE (innertype)) == 0);
+      nunits = bitsize / TREE_INT_CST_LOW (TYPE_SIZE (innertype));
       break;
 
     default:
@@ -10273,10 +10247,8 @@ build_vector_type (tree innertype, int nunits)
 tree
 build_truth_vector_type (unsigned nunits, unsigned vector_size)
 {
-  machine_mode mask_mode = targetm.vectorize.get_mask_mode (nunits,
-							    vector_size);
-
-  gcc_assert (mask_mode != VOIDmode);
+  machine_mode mask_mode
+    = targetm.vectorize.get_mask_mode (nunits, vector_size).else_blk ();
 
   unsigned HOST_WIDE_INT vsize;
   if (mask_mode == BLKmode)
@@ -12642,9 +12614,48 @@ element_mode (const_tree t)
     t = TREE_TYPE (t);
   return TYPE_MODE (t);
 }
- 
 
-/* Veirfy that basic properties of T match TV and thus T can be a variant of
+/* Vector types need to re-check the target flags each time we report
+   the machine mode.  We need to do this because attribute target can
+   change the result of vector_mode_supported_p and have_regs_of_mode
+   on a per-function basis.  Thus the TYPE_MODE of a VECTOR_TYPE can
+   change on a per-function basis.  */
+/* ??? Possibly a better solution is to run through all the types
+   referenced by a function and re-compute the TYPE_MODE once, rather
+   than make the TYPE_MODE macro call a function.  */
+
+machine_mode
+vector_type_mode (const_tree t)
+{
+  machine_mode mode;
+
+  gcc_assert (TREE_CODE (t) == VECTOR_TYPE);
+
+  mode = t->type_common.mode;
+  if (VECTOR_MODE_P (mode)
+      && (!targetm.vector_mode_supported_p (mode)
+	  || !have_regs_of_mode[mode]))
+    {
+      scalar_int_mode innermode;
+
+      /* For integers, try mapping it to a same-sized scalar mode.  */
+      if (is_int_mode (TREE_TYPE (t)->type_common.mode, &innermode))
+	{
+	  unsigned int size = (TYPE_VECTOR_SUBPARTS (t)
+			       * GET_MODE_BITSIZE (innermode));
+	  scalar_int_mode mode;
+	  if (int_mode_for_size (size, 0).exists (&mode)
+	      && have_regs_of_mode[mode])
+	    return mode;
+	}
+
+      return BLKmode;
+    }
+
+  return mode;
+}
+
+/* Verify that basic properties of T match TV and thus T can be a variant of
    TV.  TV should be the more specified variant (i.e. the main variant).  */
 
 static bool
@@ -13213,9 +13224,7 @@ verify_type (const_tree t)
       debug_tree (ct);
       error_found = true;
     }
-  /* FIXME: this is violated by the C++ FE as discussed in PR70029, when
-     FUNCTION_*_QUALIFIED flags are set.  */
-  if (0 && TYPE_MAIN_VARIANT (t) == t && ct && TYPE_MAIN_VARIANT (ct) != ct)
+  if (TYPE_MAIN_VARIANT (t) == t && ct && TYPE_MAIN_VARIANT (ct) != ct)
    {
       error ("TYPE_CANONICAL of main variant is not main variant");
       debug_tree (ct);
@@ -13267,9 +13276,23 @@ verify_type (const_tree t)
 	 but does not for C sizetypes in LTO.  */
     }
 
-  /* Check various uses of TYPE_MAXVAL.  */
+  /* Check various uses of TYPE_MAXVAL_RAW.  */
   if (RECORD_OR_UNION_TYPE_P (t))
     {
+      if (!TYPE_BINFO (t))
+	;
+      else if (TREE_CODE (TYPE_BINFO (t)) != TREE_BINFO)
+	{
+	  error ("TYPE_BINFO is not TREE_BINFO");
+	  debug_tree (TYPE_BINFO (t));
+	  error_found = true;
+	}
+      else if (TREE_TYPE (TYPE_BINFO (t)) != TYPE_MAIN_VARIANT (t))
+	{
+	  error ("TYPE_BINFO type is not TYPE_MAIN_VARIANT");
+	  debug_tree (TREE_TYPE (TYPE_BINFO (t)));
+	  error_found = true;
+	}
     }
   else if (TREE_CODE (t) == FUNCTION_TYPE || TREE_CODE (t) == METHOD_TYPE)
     {
@@ -13318,19 +13341,7 @@ verify_type (const_tree t)
       error_found = true;
     }
 
-  /* Check various uses of TYPE_BINFO.  */
-  if (RECORD_OR_UNION_TYPE_P (t))
-    {
-      if (!TYPE_BINFO (t))
-	;
-      else if (TREE_CODE (TYPE_BINFO (t)) != TREE_BINFO)
-	{
-	  error ("TYPE_BINFO is not TREE_BINFO");
-	  debug_tree (TYPE_BINFO (t));
-	  error_found = true;
-	}
-    }
-  else if (TYPE_LANG_SLOT_1 (t) && in_lto_p)
+  if (TYPE_LANG_SLOT_1 (t) && in_lto_p)
     {
       error ("TYPE_LANG_SLOT_1 (binfo) field is non-NULL");
       debug_tree (TYPE_LANG_SLOT_1 (t));

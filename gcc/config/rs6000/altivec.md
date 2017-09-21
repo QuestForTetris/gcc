@@ -148,6 +148,7 @@
    UNSPEC_VMRGL_DIRECT
    UNSPEC_VSPLT_DIRECT
    UNSPEC_VMRGEW_DIRECT
+   UNSPEC_VMRGOW_DIRECT
    UNSPEC_VSUMSWS_DIRECT
    UNSPEC_VADDCUQ
    UNSPEC_VADDEUQM
@@ -218,7 +219,7 @@
 (define_mode_iterator VParity [V4SI
 			       V2DI
 			       V1TI
-			       (TI "TARGET_VSX_TIMODE")])
+			       TI])
 
 (define_mode_attr VI_char [(V2DI "d") (V4SI "w") (V8HI "h") (V16QI "b")])
 (define_mode_attr VI_scalar [(V2DI "DI") (V4SI "SI") (V8HI "HI") (V16QI "QI")])
@@ -1357,13 +1358,22 @@
 }
   [(set_attr "type" "vecperm")])
 
-(define_insn "p8_vmrgew_v4sf_direct"
-  [(set (match_operand:V4SF 0 "register_operand" "=v")
-	(unspec:V4SF [(match_operand:V4SF 1 "register_operand" "v")
-		      (match_operand:V4SF 2 "register_operand" "v")]
+(define_insn "p8_vmrgew_<mode>_direct"
+  [(set (match_operand:VSX_W 0 "register_operand" "=v")
+	(unspec:VSX_W [(match_operand:VSX_W 1 "register_operand" "v")
+		       (match_operand:VSX_W 2 "register_operand" "v")]
 		     UNSPEC_VMRGEW_DIRECT))]
   "TARGET_P8_VECTOR"
   "vmrgew %0,%1,%2"
+  [(set_attr "type" "vecperm")])
+
+(define_insn "p8_vmrgow_<mode>_direct"
+  [(set (match_operand:VSX_W 0 "register_operand" "=v")
+	(unspec:VSX_W [(match_operand:VSX_W 1 "register_operand" "v")
+		       (match_operand:VSX_W 2 "register_operand" "v")]
+		     UNSPEC_VMRGOW_DIRECT))]
+  "TARGET_P8_VECTOR"
+  "vmrgow %0,%1,%2"
   [(set_attr "type" "vecperm")])
 
 (define_expand "vec_widen_umult_even_v16qi"
@@ -1418,6 +1428,32 @@
   DONE;
 })
 
+(define_expand "vec_widen_umult_even_v4si"
+  [(use (match_operand:V2DI 0 "register_operand"))
+   (use (match_operand:V4SI 1 "register_operand"))
+   (use (match_operand:V4SI 2 "register_operand"))]
+  "TARGET_P8_VECTOR"
+{
+ if (VECTOR_ELT_ORDER_BIG)
+    emit_insn (gen_altivec_vmuleuw (operands[0], operands[1], operands[2]));
+  else
+    emit_insn (gen_altivec_vmulouw (operands[0], operands[1], operands[2]));
+ DONE;
+})
+
+(define_expand "vec_widen_smult_even_v4si"
+  [(use (match_operand:V2DI 0 "register_operand"))
+   (use (match_operand:V4SI 1 "register_operand"))
+   (use (match_operand:V4SI 2 "register_operand"))]
+  "TARGET_P8_VECTOR"
+{
+  if (VECTOR_ELT_ORDER_BIG)
+    emit_insn (gen_altivec_vmulesw (operands[0], operands[1], operands[2]));
+ else
+    emit_insn (gen_altivec_vmulosw (operands[0], operands[1], operands[2]));
+  DONE;
+})
+
 (define_expand "vec_widen_umult_odd_v16qi"
   [(use (match_operand:V8HI 0 "register_operand" ""))
    (use (match_operand:V16QI 1 "register_operand" ""))
@@ -1467,6 +1503,32 @@
     emit_insn (gen_altivec_vmulosh (operands[0], operands[1], operands[2]));
   else
     emit_insn (gen_altivec_vmulesh (operands[0], operands[1], operands[2]));
+  DONE;
+})
+
+(define_expand "vec_widen_umult_odd_v4si"
+  [(use (match_operand:V2DI 0 "register_operand"))
+   (use (match_operand:V4SI 1 "register_operand"))
+   (use (match_operand:V4SI 2 "register_operand"))]
+  "TARGET_P8_VECTOR"
+{
+  if (VECTOR_ELT_ORDER_BIG)
+    emit_insn (gen_altivec_vmulouw (operands[0], operands[1], operands[2]));
+  else
+    emit_insn (gen_altivec_vmuleuw (operands[0], operands[1], operands[2]));
+  DONE;
+})
+
+(define_expand "vec_widen_smult_odd_v4si"
+  [(use (match_operand:V2DI 0 "register_operand"))
+   (use (match_operand:V4SI 1 "register_operand"))
+   (use (match_operand:V4SI 2 "register_operand"))]
+  "TARGET_P8_VECTOR"
+{
+  if (VECTOR_ELT_ORDER_BIG)
+    emit_insn (gen_altivec_vmulosw (operands[0], operands[1], operands[2]));
+  else
+    emit_insn (gen_altivec_vmulesw (operands[0], operands[1], operands[2]));
   DONE;
 })
 
@@ -1794,51 +1856,61 @@
   "vsum4s<VI_char>s %0,%1,%2"
   [(set_attr "type" "veccomplex")])
 
-;; FIXME: For the following two patterns, the scratch should only be
-;; allocated for !VECTOR_ELT_ORDER_BIG, and the instructions should
-;; be emitted separately.
-(define_insn "altivec_vsum2sws"
+(define_expand "altivec_vsum2sws"
+  [(use (match_operand:V4SI 0 "register_operand"))
+   (use (match_operand:V4SI 1 "register_operand"))
+   (use (match_operand:V4SI 2 "register_operand"))]
+  "TARGET_ALTIVEC"
+{
+  if (VECTOR_ELT_ORDER_BIG)
+    emit_insn (gen_altivec_vsum2sws_direct (operands[0], operands[1],
+                                            operands[2]));
+  else
+    {
+      rtx tmp1 = gen_reg_rtx (V4SImode);
+      rtx tmp2 = gen_reg_rtx (V4SImode);
+      emit_insn (gen_altivec_vsldoi_v4si (tmp1, operands[2],
+                                          operands[2], GEN_INT (12)));
+      emit_insn (gen_altivec_vsum2sws_direct (tmp2, operands[1], tmp1));
+      emit_insn (gen_altivec_vsldoi_v4si (operands[0], tmp2, tmp2,
+                                          GEN_INT (4)));
+    }
+  DONE;
+})
+
+; FIXME: This can probably be expressed without an UNSPEC.
+(define_insn "altivec_vsum2sws_direct"
   [(set (match_operand:V4SI 0 "register_operand" "=v")
         (unspec:V4SI [(match_operand:V4SI 1 "register_operand" "v")
-                      (match_operand:V4SI 2 "register_operand" "v")]
+	              (match_operand:V4SI 2 "register_operand" "v")]
 		     UNSPEC_VSUM2SWS))
-   (set (reg:SI VSCR_REGNO) (unspec:SI [(const_int 0)] UNSPEC_SET_VSCR))
-   (clobber (match_scratch:V4SI 3 "=v"))]
+   (set (reg:SI VSCR_REGNO) (unspec:SI [(const_int 0)] UNSPEC_SET_VSCR))]
+  "TARGET_ALTIVEC"
+  "vsum2sws %0,%1,%2"
+  [(set_attr "type" "veccomplex")])
+
+(define_expand "altivec_vsumsws"
+  [(use (match_operand:V4SI 0 "register_operand"))
+   (use (match_operand:V4SI 1 "register_operand"))
+   (use (match_operand:V4SI 2 "register_operand"))]
   "TARGET_ALTIVEC"
 {
   if (VECTOR_ELT_ORDER_BIG)
-    return "vsum2sws %0,%1,%2";
+    emit_insn (gen_altivec_vsumsws_direct (operands[0], operands[1],
+                                           operands[2]));
   else
-    return "vsldoi %3,%2,%2,12\n\tvsum2sws %3,%1,%3\n\tvsldoi %0,%3,%3,4";
-}
-  [(set_attr "type" "veccomplex")
-   (set (attr "length")
-     (if_then_else
-       (match_test "VECTOR_ELT_ORDER_BIG")
-       (const_string "4")
-       (const_string "12")))])
+    {
+      rtx tmp1 = gen_reg_rtx (V4SImode);
+      rtx tmp2 = gen_reg_rtx (V4SImode);
+      emit_insn (gen_altivec_vspltw_direct (tmp1, operands[2], const0_rtx));
+      emit_insn (gen_altivec_vsumsws_direct (tmp2, operands[1], tmp1));
+      emit_insn (gen_altivec_vsldoi_v4si (operands[0], tmp2, tmp2,
+                                          GEN_INT (12)));
+    }
+  DONE;
+})
 
-(define_insn "altivec_vsumsws"
-  [(set (match_operand:V4SI 0 "register_operand" "=v")
-        (unspec:V4SI [(match_operand:V4SI 1 "register_operand" "v")
-                      (match_operand:V4SI 2 "register_operand" "v")]
-		     UNSPEC_VSUMSWS))
-   (set (reg:SI VSCR_REGNO) (unspec:SI [(const_int 0)] UNSPEC_SET_VSCR))
-   (clobber (match_scratch:V4SI 3 "=v"))]
-  "TARGET_ALTIVEC"
-{
-  if (VECTOR_ELT_ORDER_BIG)
-    return "vsumsws %0,%1,%2";
-  else
-    return "vspltw %3,%2,0\n\tvsumsws %3,%1,%3\n\tvsldoi %0,%3,%3,12";
-}
-  [(set_attr "type" "veccomplex")
-   (set (attr "length")
-     (if_then_else
-       (match_test "(VECTOR_ELT_ORDER_BIG)")
-       (const_string "4")
-       (const_string "12")))])
-
+; FIXME: This can probably be expressed without an UNSPEC.
 (define_insn "altivec_vsumsws_direct"
   [(set (match_operand:V4SI 0 "register_operand" "=v")
         (unspec:V4SI [(match_operand:V4SI 1 "register_operand" "v")

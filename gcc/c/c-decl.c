@@ -1557,11 +1557,10 @@ pushtag (location_t loc, tree name, tree type)
 	  && (TYPE_MAIN_VARIANT (TREE_TYPE (b->decl))
 	      != TYPE_MAIN_VARIANT (type)))
 	{
-	  warning_at (loc, OPT_Wc___compat,
-		      ("using %qD as both a typedef and a tag is "
-		       "invalid in C++"),
-		      b->decl);
-	  if (b->locus != UNKNOWN_LOCATION)
+	  if (warning_at (loc, OPT_Wc___compat,
+			  ("using %qD as both a typedef and a tag is "
+			   "invalid in C++"), b->decl)
+	      && b->locus != UNKNOWN_LOCATION)
 	    inform (b->locus, "originally defined here");
 	}
     }
@@ -2384,6 +2383,10 @@ merge_decls (tree newdecl, tree olddecl, tree newtype, tree oldtype)
 	  SET_DECL_ALIGN (newdecl, DECL_ALIGN (olddecl));
 	  DECL_USER_ALIGN (newdecl) |= DECL_USER_ALIGN (olddecl);
 	}
+      if (DECL_WARN_IF_NOT_ALIGN (olddecl)
+	  > DECL_WARN_IF_NOT_ALIGN (newdecl))
+	SET_DECL_WARN_IF_NOT_ALIGN (newdecl,
+				    DECL_WARN_IF_NOT_ALIGN (olddecl));
     }
 
   /* Keep the old rtl since we can safely use it.  */
@@ -5396,6 +5399,13 @@ check_bitfield_type_and_width (location_t loc, tree *type, tree *width,
       *type = unsigned_type_node;
     }
 
+  if (TYPE_WARN_IF_NOT_ALIGN (*type))
+    {
+      error_at (loc, "cannot declare bit-field %qs with %<warn_if_not_aligned%> type",
+		name);
+      *type = unsigned_type_node;
+    }
+
   type_mv = TYPE_MAIN_VARIANT (*type);
   if (!in_system_header_at (input_location)
       && type_mv != integer_type_node
@@ -6596,11 +6606,10 @@ grokdeclarator (const struct c_declarator *declarator,
 		  || (current_scope == file_scope && B_IN_EXTERNAL_SCOPE (b)))
 	      && TYPE_MAIN_VARIANT (b->decl) != TYPE_MAIN_VARIANT (type))
 	    {
-	      warning_at (declarator->id_loc, OPT_Wc___compat,
-			  ("using %qD as both a typedef and a tag is "
-			   "invalid in C++"),
-			  decl);
-	      if (b->locus != UNKNOWN_LOCATION)
+	      if (warning_at (declarator->id_loc, OPT_Wc___compat,
+			      ("using %qD as both a typedef and a tag is "
+			       "invalid in C++"), decl)
+		  && b->locus != UNKNOWN_LOCATION)
 		inform (b->locus, "originally defined here");
 	    }
 	}
@@ -7831,6 +7840,26 @@ warn_cxx_compat_finish_struct (tree fieldlist, enum tree_code code,
     b->in_struct = 0;
 }
 
+/* Function to help qsort sort FIELD_DECLs by name order.  */
+
+static int
+field_decl_cmp (const void *x_p, const void *y_p)
+{
+  const tree *const x = (const tree *) x_p;
+  const tree *const y = (const tree *) y_p;
+
+  if (DECL_NAME (*x) == DECL_NAME (*y))
+    /* A nontype is "greater" than a type.  */
+    return (TREE_CODE (*y) == TYPE_DECL) - (TREE_CODE (*x) == TYPE_DECL);
+  if (DECL_NAME (*x) == NULL_TREE)
+    return -1;
+  if (DECL_NAME (*y) == NULL_TREE)
+    return 1;
+  if (DECL_NAME (*x) < DECL_NAME (*y))
+    return -1;
+  return 1;
+}
+
 /* Fill in the fields of a RECORD_TYPE or UNION_TYPE node, T.
    LOC is the location of the RECORD_TYPE or UNION_TYPE's definition.
    FIELDLIST is a chain of FIELD_DECL nodes for the fields.
@@ -8154,6 +8183,53 @@ finish_struct (location_t loc, tree t, tree fieldlist, tree attributes,
     struct_parse_info->struct_types.safe_push (t);
 
   return t;
+}
+
+static struct {
+  gt_pointer_operator new_value;
+  void *cookie;
+} resort_data;
+
+/* This routine compares two fields like field_decl_cmp but using the
+pointer operator in resort_data.  */
+
+static int
+resort_field_decl_cmp (const void *x_p, const void *y_p)
+{
+  const tree *const x = (const tree *) x_p;
+  const tree *const y = (const tree *) y_p;
+
+  if (DECL_NAME (*x) == DECL_NAME (*y))
+    /* A nontype is "greater" than a type.  */
+    return (TREE_CODE (*y) == TYPE_DECL) - (TREE_CODE (*x) == TYPE_DECL);
+  if (DECL_NAME (*x) == NULL_TREE)
+    return -1;
+  if (DECL_NAME (*y) == NULL_TREE)
+    return 1;
+  {
+    tree d1 = DECL_NAME (*x);
+    tree d2 = DECL_NAME (*y);
+    resort_data.new_value (&d1, resort_data.cookie);
+    resort_data.new_value (&d2, resort_data.cookie);
+    if (d1 < d2)
+      return -1;
+  }
+  return 1;
+}
+
+/* Resort DECL_SORTED_FIELDS because pointers have been reordered.  */
+
+void
+resort_sorted_fields (void *obj,
+		      void * ARG_UNUSED (orig_obj),
+		      gt_pointer_operator new_value,
+		      void *cookie)
+{
+  struct sorted_fields_type *sf = (struct sorted_fields_type *) obj;
+  resort_data.new_value = new_value;
+  resort_data.cookie = cookie;
+  qsort (&sf->elts[0], sf->len, sizeof (tree),
+	 resort_field_decl_cmp);
 }
 
 /* Lay out the type T, and its element type, and so on.  */

@@ -211,7 +211,7 @@ static void
 unpack_ts_fixed_cst_value_fields (struct bitpack_d *bp, tree expr)
 {
   FIXED_VALUE_TYPE *fp = ggc_alloc<fixed_value> ();
-  fp->mode = bp_unpack_machine_mode (bp);
+  fp->mode = as_a <scalar_mode> (bp_unpack_machine_mode (bp));
   fp->data.low = bp_unpack_var_len_int (bp);
   fp->data.high = bp_unpack_var_len_int (bp);
   TREE_FIXED_CST_PTR (expr) = fp;
@@ -691,10 +691,7 @@ lto_input_ts_decl_common_tree_pointers (struct lto_input_block *ib,
   DECL_SIZE (expr) = stream_read_tree (ib, data_in);
   DECL_SIZE_UNIT (expr) = stream_read_tree (ib, data_in);
   DECL_ATTRIBUTES (expr) = stream_read_tree (ib, data_in);
-
-  /* Do not stream DECL_ABSTRACT_ORIGIN.  We cannot handle debug information
-     for early inlining so drop it on the floor instead of ICEing in
-     dwarf2out.c.  */
+  DECL_ABSTRACT_ORIGIN (expr) = stream_read_tree (ib, data_in);
 
   if ((VAR_P (expr) || TREE_CODE (expr) == PARM_DECL)
       && DECL_HAS_VALUE_EXPR_P (expr))
@@ -841,8 +838,6 @@ lto_input_ts_type_non_common_tree_pointers (struct lto_input_block *ib,
   if (!POINTER_TYPE_P (expr))
     TYPE_MIN_VALUE_RAW (expr) = stream_read_tree (ib, data_in);
   TYPE_MAX_VALUE_RAW (expr) = stream_read_tree (ib, data_in);
-  if (RECORD_OR_UNION_TYPE_P (expr))
-    TYPE_BINFO (expr) = stream_read_tree (ib, data_in);
 }
 
 

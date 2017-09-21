@@ -1571,30 +1571,6 @@ proc check_linker_plugin_available { } {
   } "-flto -fuse-linker-plugin"]
 }
 
-# Return 1 if the target supports executing 750CL paired-single instructions, 0
-# otherwise.  Cache the result.
-
-proc check_750cl_hw_available { } {
-    return [check_cached_effective_target 750cl_hw_available {
-	# If this is not the right target then we can skip the test.
-	if { ![istarget powerpc-*paired*] } {
-	    expr 0
-	} else {
-	    check_runtime_nocache 750cl_hw_available {
-		 int main()
-		 {
-		 #ifdef __MACH__
-		   asm volatile ("ps_mul v0,v0,v0");
-		 #else
-		   asm volatile ("ps_mul 0,0,0");
-		 #endif
-		   return 0;
-		 }
-	    } "-mpaired"
-	}
-    }]
-}
-
 # Return 1 if the target OS supports running SSE executables, 0
 # otherwise.  Cache the result.
 
@@ -1635,7 +1611,30 @@ proc check_avx_os_support_available { } {
 		  unsigned int eax, edx;
 
 		  asm ("xgetbv" : "=a" (eax), "=d" (edx) : "c" (0));
-		  return (eax & 6) != 6;
+		  return (eax & 0x06) != 0x06;
+		}
+	    } ""
+	}
+    }]
+}
+
+# Return 1 if the target OS supports running AVX executables, 0
+# otherwise.  Cache the result.
+
+proc check_avx512_os_support_available { } {
+    return [check_cached_effective_target avx512_os_support_available {
+	# If this is not the right target then we can skip the test.
+	if { !([istarget i?86-*-*] || [istarget x86_64-*-*]) } {
+	    expr 0
+	} else {
+	    # Check that OS has AVX512, AVX and SSE saving enabled.
+	    check_runtime_nocache avx512_os_support_available {
+		int main ()
+		{
+		  unsigned int eax, edx;
+
+		  asm ("xgetbv" : "=a" (eax), "=d" (edx) : "c" (0));
+		  return (eax & 0xe6) != 0xe6;
 		}
 	    } ""
 	}
@@ -1656,13 +1655,219 @@ proc check_sse_hw_available { } {
 		int main ()
 		{
 		  unsigned int eax, ebx, ecx, edx;
-		  if (__get_cpuid (1, &eax, &ebx, &ecx, &edx))
-		    return !(edx & bit_SSE);
-		  return 1;
+		  if (!__get_cpuid (1, &eax, &ebx, &ecx, &edx))
+		    return 1;
+
+		  return !(edx & bit_SSE);
 		}
 	    } ""
 	}
     }]
+}
+
+# Return 1 if the target supports executing SSE2 instructions, 0
+# otherwise.  Cache the result.
+
+proc check_sse2_hw_available { } {
+    return [check_cached_effective_target sse2_hw_available {
+	# If this is not the right target then we can skip the test.
+	if { !([istarget i?86-*-*] || [istarget x86_64-*-*]) } {
+	    expr 0
+	} else {
+	    check_runtime_nocache sse2_hw_available {
+		#include "cpuid.h"
+		int main ()
+		{
+		  unsigned int eax, ebx, ecx, edx;
+		  if (!__get_cpuid (1, &eax, &ebx, &ecx, &edx))
+		    return 1;
+
+		  return !(edx & bit_SSE2);
+		}
+	    } ""
+	}
+    }]
+}
+
+# Return 1 if the target supports executing SSE4 instructions, 0
+# otherwise.  Cache the result.
+
+proc check_sse4_hw_available { } {
+    return [check_cached_effective_target sse4_hw_available {
+	# If this is not the right target then we can skip the test.
+	if { !([istarget i?86-*-*] || [istarget x86_64-*-*]) } {
+	    expr 0
+	} else {
+	    check_runtime_nocache sse4_hw_available {
+		#include "cpuid.h"
+		int main ()
+		{
+		  unsigned int eax, ebx, ecx, edx;
+		  if (!__get_cpuid (1, &eax, &ebx, &ecx, &edx))
+		    return 1;
+
+		  return !(ecx & bit_SSE4_2);
+		}
+	    } ""
+	}
+    }]
+}
+
+# Return 1 if the target supports executing AVX instructions, 0
+# otherwise.  Cache the result.
+
+proc check_avx_hw_available { } {
+    return [check_cached_effective_target avx_hw_available {
+	# If this is not the right target then we can skip the test.
+	if { !([istarget i?86-*-*] || [istarget x86_64-*-*]) } {
+	    expr 0
+	} else {
+	    check_runtime_nocache avx_hw_available {
+		#include "cpuid.h"
+		int main ()
+		{
+		  unsigned int eax, ebx, ecx, edx;
+		  if (!__get_cpuid (1, &eax, &ebx, &ecx, &edx))
+		    return 1;
+
+		  return ((ecx & (bit_AVX | bit_OSXSAVE))
+			  != (bit_AVX | bit_OSXSAVE));
+		}
+	    } ""
+	}
+    }]
+}
+
+# Return 1 if the target supports executing AVX2 instructions, 0
+# otherwise.  Cache the result.
+
+proc check_avx2_hw_available { } {
+    return [check_cached_effective_target avx2_hw_available {
+	# If this is not the right target then we can skip the test.
+	if { !([istarget x86_64-*-*] || [istarget i?86-*-*]) } {
+	    expr 0
+	} else {
+	    check_runtime_nocache avx2_hw_available {
+		#include <stddef.h>
+		#include "cpuid.h"
+		int main ()
+		{
+		  unsigned int eax, ebx, ecx, edx;
+
+		  if (__get_cpuid_max (0, NULL) < 7)
+		    return 1;
+
+		  __cpuid (1, eax, ebx, ecx, edx);
+
+		  if (!(ecx & bit_OSXSAVE))
+		    return 1;
+
+		  __cpuid_count (7, 0, eax, ebx, ecx, edx);
+
+		  return !(ebx & bit_AVX2);
+		}
+	    } ""
+	}
+    }]
+}
+
+# Return 1 if the target supports executing AVX512 foundation instructions, 0
+# otherwise.  Cache the result.
+
+proc check_avx512f_hw_available { } {
+    return [check_cached_effective_target avx512f_hw_available {
+	# If this is not the right target then we can skip the test.
+	if { !([istarget x86_64-*-*] || [istarget i?86-*-*]) } {
+	    expr 0
+	} else {
+	    check_runtime_nocache avx512f_hw_available {
+		#include <stddef.h>
+		#include "cpuid.h"
+		int main ()
+		{
+		  unsigned int eax, ebx, ecx, edx;
+
+		  if (__get_cpuid_max (0, NULL) < 7)
+		    return 1;
+
+		  __cpuid (1, eax, ebx, ecx, edx);
+
+		  if (!(ecx & bit_OSXSAVE))
+		    return 1;
+
+		  __cpuid_count (7, 0, eax, ebx, ecx, edx);
+
+		  return !(ebx & bit_AVX512F);
+		}
+	    } ""
+	}
+    }]
+}
+
+# Return 1 if the target supports running SSE executables, 0 otherwise.
+
+proc check_effective_target_sse_runtime { } {
+    if { [check_effective_target_sse]
+	 && [check_sse_hw_available]
+	 && [check_sse_os_support_available] } {
+	return 1
+    }
+    return 0
+}
+
+# Return 1 if the target supports running SSE2 executables, 0 otherwise.
+
+proc check_effective_target_sse2_runtime { } {
+    if { [check_effective_target_sse2]
+	 && [check_sse2_hw_available]
+	 && [check_sse_os_support_available] } {
+	return 1
+    }
+    return 0
+}
+
+# Return 1 if the target supports running SSE4 executables, 0 otherwise.
+
+proc check_effective_target_sse4_runtime { } {
+    if { [check_effective_target_sse4]
+	 && [check_sse4_hw_available]
+	 && [check_sse_os_support_available] } {
+	return 1
+    }
+    return 0
+}
+
+# Return 1 if the target supports running AVX executables, 0 otherwise.
+
+proc check_effective_target_avx_runtime { } {
+    if { [check_effective_target_avx]
+	 && [check_avx_hw_available]
+	 && [check_avx_os_support_available] } {
+	return 1
+    }
+    return 0
+}
+
+# Return 1 if the target supports running AVX2 executables, 0 otherwise.
+
+proc check_effective_target_avx2_runtime { } {
+    if { [check_effective_target_avx2]
+	 && [check_avx2_hw_available]
+	 && [check_avx_os_support_available] } {
+	return 1
+    }
+    return 0
+}
+
+# Return 1 if the target supports running AVX512f executables, 0 otherwise.
+
+proc check_effective_target_avx512f_runtime { } {
+    if { [check_effective_target_avx512f]
+	 && [check_avx512f_hw_available]
+	 && [check_avx512_os_support_available] } {
+	return 1
+    }
+    return 0
 }
 
 # Return 1 if the target supports executing MIPS Paired-Single instructions,
@@ -1742,139 +1947,6 @@ proc check_mips_msa_hw_available { } {
   }]
 }
 
-# Return 1 if the target supports executing SSE2 instructions, 0
-# otherwise.  Cache the result.
-
-proc check_sse2_hw_available { } {
-    return [check_cached_effective_target sse2_hw_available {
-	# If this is not the right target then we can skip the test.
-	if { !([istarget i?86-*-*] || [istarget x86_64-*-*]) } {
-	    expr 0
-	} else {
-	    check_runtime_nocache sse2_hw_available {
-		#include "cpuid.h"
-		int main ()
-		{
-		  unsigned int eax, ebx, ecx, edx;
-		  if (__get_cpuid (1, &eax, &ebx, &ecx, &edx))
-		    return !(edx & bit_SSE2);
-		  return 1;
-		}
-	    } ""
-	}
-    }]
-}
-
-# Return 1 if the target supports executing SSE4 instructions, 0
-# otherwise.  Cache the result.
-
-proc check_sse4_hw_available { } {
-    return [check_cached_effective_target sse4_hw_available {
-	# If this is not the right target then we can skip the test.
-	if { !([istarget i?86-*-*] || [istarget x86_64-*-*]) } {
-	    expr 0
-	} else {
-	    check_runtime_nocache sse4_hw_available {
-		#include "cpuid.h"
-		int main ()
-		{
-		  unsigned int eax, ebx, ecx, edx;
-		  if (__get_cpuid (1, &eax, &ebx, &ecx, &edx))
-		    return !(ecx & bit_SSE4_2);
-		  return 1;
-		}
-	    } ""
-	}
-    }]
-}
-
-# Return 1 if the target supports executing AVX instructions, 0
-# otherwise.  Cache the result.
-
-proc check_avx_hw_available { } {
-    return [check_cached_effective_target avx_hw_available {
-	# If this is not the right target then we can skip the test.
-	if { !([istarget i?86-*-*] || [istarget x86_64-*-*]) } {
-	    expr 0
-	} else {
-	    check_runtime_nocache avx_hw_available {
-		#include "cpuid.h"
-		int main ()
-		{
-		  unsigned int eax, ebx, ecx, edx;
-		  if (__get_cpuid (1, &eax, &ebx, &ecx, &edx))
-		    return ((ecx & (bit_AVX | bit_OSXSAVE))
-			    != (bit_AVX | bit_OSXSAVE));
-		  return 1;
-		}
-	    } ""
-	}
-    }]
-}
-
-# Return 1 if the target supports executing AVX2 instructions, 0
-# otherwise.  Cache the result.
-
-proc check_avx2_hw_available { } {
-    return [check_cached_effective_target avx2_hw_available {
-	# If this is not the right target then we can skip the test.
-	if { !([istarget x86_64-*-*] || [istarget i?86-*-*]) } {
-	    expr 0
-	} else {
-	    check_runtime_nocache avx2_hw_available {
-		#include "cpuid.h"
-		int main ()
-		{
-		  unsigned int eax, ebx, ecx, edx;
-		  if (!__get_cpuid (1, &eax, &ebx, &ecx, &edx)
-		      || ((ecx & bit_OSXSAVE) != bit_OSXSAVE))
-		    return 1;
-
-		  if (__get_cpuid_max (0, NULL) < 7)
-		    return 1;
-
-		  __cpuid_count (7, 0, eax, ebx, ecx, edx);
-
-		  return (ebx & bit_AVX2) != bit_AVX2;
-		}
-	    } ""
-	}
-    }]
-}
-
-# Return 1 if the target supports running SSE executables, 0 otherwise.
-
-proc check_effective_target_sse_runtime { } {
-    if { [check_effective_target_sse]
-	 && [check_sse_hw_available]
-	 && [check_sse_os_support_available] } {
-	return 1
-    }
-    return 0
-}
-
-# Return 1 if the target supports running SSE2 executables, 0 otherwise.
-
-proc check_effective_target_sse2_runtime { } {
-    if { [check_effective_target_sse2]
-	 && [check_sse2_hw_available]
-	 && [check_sse_os_support_available] } {
-	return 1
-    }
-    return 0
-}
-
-# Return 1 if the target supports running SSE4 executables, 0 otherwise.
-
-proc check_effective_target_sse4_runtime { } {
-    if { [check_effective_target_sse4]
-	 && [check_sse4_hw_available]
-	 && [check_sse_os_support_available] } {
-	return 1
-    }
-    return 0
-}
-
 # Return 1 if the target supports running MIPS Paired-Single
 # executables, 0 otherwise.
 
@@ -1904,28 +1976,6 @@ proc check_effective_target_mips_msa_runtime { } {
     return 1
   }
   return 0
-}
-
-# Return 1 if the target supports running AVX executables, 0 otherwise.
-
-proc check_effective_target_avx_runtime { } {
-    if { [check_effective_target_avx]
-	 && [check_avx_hw_available]
-	 && [check_avx_os_support_available] } {
-	return 1
-    }
-    return 0
-}
-
-# Return 1 if the target supports running AVX2 executables, 0 otherwise.
-
-proc check_effective_target_avx2_runtime { } {
-    if { [check_effective_target_avx2]
-	 && [check_avx2_hw_available]
-	 && [check_avx_os_support_available] } {
-	return 1
-    }
-    return 0
 }
 
 # Return 1 if we are compiling for 64-bit PowerPC but we do not use direct
@@ -1968,6 +2018,30 @@ proc check_ppc_cpu_supports_hw_available { } {
 		  return 0;
 		}
 	    } $options
+	}
+    }]
+}
+
+# Return 1 if the target supports executing 750CL paired-single instructions, 0
+# otherwise.  Cache the result.
+
+proc check_750cl_hw_available { } {
+    return [check_cached_effective_target 750cl_hw_available {
+	# If this is not the right target then we can skip the test.
+	if { ![istarget powerpc-*paired*] } {
+	    expr 0
+	} else {
+	    check_runtime_nocache 750cl_hw_available {
+		 int main()
+		 {
+		 #ifdef __MACH__
+		   asm volatile ("ps_mul v0,v0,v0");
+		 #else
+		   asm volatile ("ps_mul 0,0,0");
+		 #endif
+		   return 0;
+		 }
+	    } "-mpaired"
 	}
     }]
 }
@@ -5332,6 +5406,28 @@ proc check_effective_target_vect_perm_short { } {
     return $et_vect_perm_short_saved($et_index)
 }
 
+# Return 1 if the target plus current options supports folding of
+# copysign into XORSIGN.
+#
+# This won't change for different subtargets so cache the result.
+
+proc check_effective_target_xorsign { } {
+    global et_xorsign_saved
+    global et_index
+
+    if [info exists et_xorsign_saved($et_index)] {
+        verbose "check_effective_target_xorsign: using cached result" 2
+    } else {
+	set et_xorsign_saved($et_index) 0
+        if { [istarget aarch64*-*-*] || [istarget arm*-*-*] } {
+	    set et_xorsign_saved($et_index) 1
+        }
+    }
+    verbose "check_effective_target_xorsign:\
+	     returning $et_xorsign_saved($et_index)" 2
+    return $et_xorsign_saved($et_index)
+}
+
 # Return 1 if the target plus current options supports a vector
 # widening summation of *short* args into *int* result, 0 otherwise.
 #
@@ -7731,13 +7827,13 @@ proc check_effective_target_c++14 { } {
     if [check_effective_target_c++14_only] {
 	return 1
     }
-    return [check_effective_target_c++1z]
+    return [check_effective_target_c++17]
 }
 proc check_effective_target_c++14_down { } {
     if ![check_effective_target_c++] {
 	return 0
     }
-    return [expr ![check_effective_target_c++1z] ]
+    return [expr ![check_effective_target_c++17] ]
 }
 
 proc check_effective_target_c++98_only { } {
@@ -7754,7 +7850,7 @@ proc check_effective_target_c++98_only { } {
     return 0
 }
 
-proc check_effective_target_c++1z_only { } {
+proc check_effective_target_c++17_only { } {
     global cxx_default
     if ![check_effective_target_c++] {
 	return 0
@@ -7767,8 +7863,35 @@ proc check_effective_target_c++1z_only { } {
     }
     return 0
 }
-proc check_effective_target_c++1z { } {
-    return [check_effective_target_c++1z_only]
+
+proc check_effective_target_c++17 { } {
+    if [check_effective_target_c++17_only] {
+	return 1
+    }
+    return [check_effective_target_c++2a]
+}
+proc check_effective_target_c++17_down { } {
+    if ![check_effective_target_c++] {
+	return 0
+    }
+    return [expr ![check_effective_target_c++2a] ]
+}
+
+proc check_effective_target_c++2a_only { } {
+    global cxx_default
+    if ![check_effective_target_c++] {
+	return 0
+    }
+    if [check-flags { { } { } { -std=c++2a -std=gnu++2a } }] {
+	return 1
+    }
+    if { $cxx_default == "c++20" && [check-flags { { } { } { } { -std=* } }] } {
+	return 1
+    }
+    return 0
+}
+proc check_effective_target_c++2a { } {
+    return [check_effective_target_c++2a_only]
 }
 
 # Check for C++ Concepts TS support, i.e. -fconcepts flag.
@@ -8408,8 +8531,8 @@ proc check_effective_target_rdrand { } {
     } "-mrdrnd" ]
 }
 
-# Return 1 if the target supports coprocessor instructions: cdp, ldc, stc, mcr and
-# mrc.
+# Return 1 if the target supports coprocessor instructions: cdp, ldc, ldcl,
+# stc, stcl, mcr and mrc.
 proc check_effective_target_arm_coproc1_ok_nocache { } {
     if { ![istarget arm*-*-*] } {
 	return 0
@@ -8434,7 +8557,7 @@ proc check_effective_target_arm_coproc2_ok_nocache { } {
 	return 0
     }
     return [check_no_compiler_messages_nocache arm_coproc2_ok assembly {
-	#if __ARM_ARCH < 5
+	#if (__thumb__ && !__thumb2__) || __ARM_ARCH < 5
 	#error FOO
 	#endif
     }]
@@ -8453,7 +8576,8 @@ proc check_effective_target_arm_coproc3_ok_nocache { } {
 	return 0
     }
     return [check_no_compiler_messages_nocache arm_coproc3_ok assembly {
-	#if __ARM_ARCH < 6 && !defined (__ARM_ARCH_5TE__)
+	#if (__thumb__ && !__thumb2__) \
+	    || (__ARM_ARCH < 6 && !defined (__ARM_ARCH_5TE__))
 	#error FOO
 	#endif
     }]
@@ -8472,7 +8596,7 @@ proc check_effective_target_arm_coproc4_ok_nocache { } {
 	return 0
     }
     return [check_no_compiler_messages_nocache arm_coproc4_ok assembly {
-	#if __ARM_ARCH < 6
+	#if (__thumb__ && !__thumb2__) || __ARM_ARCH < 6
 	#error FOO
 	#endif
     }]
@@ -8481,4 +8605,100 @@ proc check_effective_target_arm_coproc4_ok_nocache { } {
 proc check_effective_target_arm_coproc4_ok { } {
     return [check_cached_effective_target arm_coproc4_ok \
 		check_effective_target_arm_coproc4_ok_nocache]
+}
+
+# Return 1 if the target supports the auto_inc_dec optimization pass.
+proc check_effective_target_autoincdec { } {
+    if { ![check_no_compiler_messages auto_incdec assembly { void f () { }
+	 } "-O2 -fdump-rtl-auto_inc_dec" ] } {
+      return 0
+    }
+
+    set dumpfile [glob -nocomplain "auto_incdec[pid].c.\[0-9\]\[0-9\]\[0-9\]r.auto_inc_dec"]
+    if { [file exists $dumpfile ] } {
+	file delete $dumpfile
+	return 1
+    }
+    return 0
+}
+
+# Return 1 if the target has support for stack probing designed
+# to avoid stack-clash style attacks.
+#
+# This is used to restrict the stack-clash mitigation tests to
+# just those targets that have been explicitly supported.
+# 
+# In addition to the prologue work on those targets, each target's
+# properties should be described in the functions below so that
+# tests do not become a mess of unreadable target conditions.
+# 
+proc check_effective_target_supports_stack_clash_protection { } {
+
+   # Temporary until the target bits are fully ACK'd.
+#  if { [istarget aarch*-*-*]
+#       || [istarget s390*-*-*]
+#       || [istarget powerpc*-*-*] || [istarget rs6000*-*-*] } {
+#	return 1
+#  }
+
+    if { [istarget x86_64-*-*] || [istarget i?86-*-*] } {
+	return 1
+    }
+  return 0
+}
+
+# Return 1 if the target creates a frame pointer for non-leaf functions
+# Note we ignore cases where we apply tail call optimization here.
+proc check_effective_target_frame_pointer_for_non_leaf { } {
+  if { [istarget aarch*-*-*] } {
+	return 1
+  }
+  return 0
+}
+
+# Return 1 if the target's calling sequence or its ABI
+# create implicit stack probes at or prior to function entry.
+proc check_effective_target_caller_implicit_probes { } {
+
+  # On x86/x86_64 the call instruction itself pushes the return
+  # address onto the stack.  That is an implicit probe of *sp.
+  if { [istarget x86_64-*-*] || [istarget i?86-*-*] } {
+	return 1
+  }
+
+  # On PPC, the ABI mandates that the address of the outer
+  # frame be stored at *sp.  Thus each allocation of stack
+  # space is itself an implicit probe of *sp.
+  if { [istarget powerpc*-*-*] || [istarget rs6000*-*-*] } {
+	return 1
+  }
+
+  # s390's ABI has a register save area allocated by the
+  # caller for use by the callee.  The mere existence does
+  # not constitute a probe by the caller, but when the slots
+  # used by the callee those stores are implicit probes.
+  if { [istarget s390*-*-*] } {
+	return 1
+  }
+
+  # Not strictly true on aarch64, but we have agreed that we will
+  # consider any function that pushes SP more than 3kbytes into
+  # the guard page as broken.  This essentially means that we can
+  # consider the aarch64 as having a caller implicit probe at
+  # *(sp + 1k).
+  if { [istarget aarch64*-*-*] } {
+	return 1;
+  }
+
+  return 0
+}
+
+# Targets that potentially realign the stack pointer often cause residual
+# stack allocations and make it difficult to elimination loops or residual
+# allocations for dynamic stack allocations
+proc check_effective_target_callee_realigns_stack { } {
+  if { [istarget x86_64-*-*] || [istarget i?86-*-*] } {
+	return 1
+  }
+  return 0
 }

@@ -3150,7 +3150,8 @@ gimplify_call_expr (tree *expr_p, gimple_seq *pre_p, bool want_value)
 
       if (EXPR_CILK_SPAWN (*expr_p))
         gimplify_cilk_detach (pre_p);
-      gimple *call = gimple_build_call_internal_vec (ifn, vargs);
+      gcall *call = gimple_build_call_internal_vec (ifn, vargs);
+      gimple_call_set_nothrow (call, TREE_NOTHROW (*expr_p));
       gimplify_seq_add_stmt (pre_p, call);
       return GS_ALL_DONE;
     }
@@ -5636,6 +5637,7 @@ gimplify_modify_expr (tree *expr_p, gimple_seq *pre_p, gimple_seq *post_p,
 	      vargs.quick_push (CALL_EXPR_ARG (*from_p, i));
 	    }
 	  call_stmt = gimple_build_call_internal_vec (ifn, vargs);
+	  gimple_call_set_nothrow (call_stmt, TREE_NOTHROW (*from_p));
 	  gimple_set_location (call_stmt, EXPR_LOCATION (*expr_p));
 	}
       else
@@ -8915,7 +8917,7 @@ gimplify_adjust_omp_clauses (gimple_seq *pre_p, gimple_seq body, tree *list_p,
 		OMP_CLAUSE_SHARED_READONLY (c) = 1;
 	      else if (DECL_P (decl)
 		       && ((OMP_CLAUSE_CODE (c) == OMP_CLAUSE_SHARED
-			    && (n->value & GOVD_WRITTEN) != 1)
+			    && (n->value & GOVD_WRITTEN) != 0)
 			   || (OMP_CLAUSE_CODE (c) == OMP_CLAUSE_LINEAR
 			       && !OMP_CLAUSE_LINEAR_NO_COPYOUT (c)))
 		       && omp_shared_to_firstprivate_optimizable_decl_p (decl))
