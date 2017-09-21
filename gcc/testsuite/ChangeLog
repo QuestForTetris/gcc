@@ -1,3 +1,29 @@
+2017-09-20  Martin Sebor  <msebor@redhat.com>
+
+	PR c/81854
+	* g++.dg/ext/attr-ifunc-2.C: Correct type errors.
+	* g++.dg/ext/attr-ifunc-4.C: Ditto.
+	* lib/target-supports.exp: Adjust for C++.
+
+	PR c/81854
+	* gcc.dg/attr-ifunc-1.c: Correct type errors.
+	* gcc.dg/attr-ifunc-2.c: Ditto.
+	* gcc.dg/attr-ifunc-3.c: Ditto.
+	* gcc.dg/attr-ifunc-4.c: Ditto.
+	* gcc.dg/attr-ifunc-5.c: Ditto.
+	* gcc.dg/pr81854.c: Require ifunc support.
+	* lib/target-supports.exp: Correct type error.
+
+2017-09-20  Jeff Law  <law@redhat.com>
+
+	* gcc.target/i386/stack-check-11.c: Update test and regexp
+	so that it works for both i?86 and x86_64.
+
+2017-09-19  Segher Boessenkool  <segher@kernel.crashing.org>
+
+	PR target/77687
+	* gcc.target/powerpc/pr77687.c: New testcase.
+
 2017-09-20  Jakub Jelinek  <jakub@redhat.com>
 
 	P0409R2 - allow lambda capture [=, this]
