@@ -11,14 +11,13 @@
 #include "target-def.h"
 
 /* Helper functions for instructions in machine description. */
-static const char *qft_cbranch(rtx[] operands, int which_alternative) {
+static const char *qft_cbranch(rtx[] operands, unsigned int which_alternative) {
   switch (GET_CODE(operands[0])) {
   case EQ: // equals
     switch (which_alternative) {
     case 0: // memory, memory
-      return "SUB A%2 A%1 " CC_ADDRESS ";\n"
-             "MNZ A" CC_ADDRESS " %l3 0;\n";
-    
+    case 1: // memory, immediate
+    case 2: // immediate, memory
     }
 
   case NE: // not equals
@@ -52,7 +51,7 @@ static const char *qft_cbranch(rtx[] operands, int which_alternative) {
              "MLZ A" CC_ADDRESS " %l3 0;\n";
     case 2: // immediate, memory
       if (INTVAL(operands[1]) == 0) {
-        return "MLZ A%1 %l3 0;\n";
+        return "MLZ A%2 %l3 0;\n";
       } else {
         return "SUB A%2 %1 " CC_ADDRESS ";\n"
                "MLZ A" CC_ADDRESS " %l3 0;\n";
@@ -78,10 +77,10 @@ static const char *qft_cbranch(rtx[] operands, int which_alternative) {
 
   /* do these later, they're harder than they look */
   case GE: // greater than or equal
-    assert(false);
+    assert(0);
 
   case LE: // less than or equal
-    assert(false);
+    assert(0);
   }
 }
 
