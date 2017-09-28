@@ -10,6 +10,8 @@
 
 #include "target-def.h"
 
+static char multiply_buffer[561]; // number of bytes * shift buffer size without terminator + terminator = 16 * 35 + 1, see qft_multiply
+
 /* Helper functions for instructions in machine description. */
 static const char *qft_cbranch(rtx[] operands, unsigned int which_alternative) {
   switch (GET_CODE(operands[0])) {
@@ -97,7 +99,6 @@ static const char *qft_multiply(rtx[] operands, unsigned int which_alternative) 
            ". MNZ A1 A3 0;\n"
            ". SUB A1 1 1;\n"
   } else { // memory and an immediate, either order
-    char *output_buffer = (char*) malloc(561); // number of bytes * shift buffer size without terminator + terminator = 16 * 35 + 1
     char shift_buffer[36]; // length of format string + length of max short + terminator = 36
     int pos = 0;
 
@@ -107,13 +108,13 @@ static const char *qft_multiply(rtx[] operands, unsigned int which_alternative) 
       if (immediate & (1 << i)) {
         int copied = sprintf(shift_buffer, ". SL A%%%d %d 1;\n. ADD A%%0 A1 %%0;\n", which_alternative, i);
 
-        memcpy(output_buffer + pos, shift_buffer, copied);
+        memcpy(multiply_buffer + pos, shift_buffer, copied);
         pos += copied;
       }
     }
 
-    output_buffer[pos] = '\0';
-    return (const char*) output_buffer;
+    multiply_buffer[pos] = '\0';
+    return (const char*) multiply_buffer;
   }
 }
 
